@@ -18,13 +18,7 @@ const razorpay = new Razorpay({
 // ----------------------------------------
 app.post('/create-order', async (req, res) => {
   try {
-    const { 
-      amount, 
-      product_name, 
-      product_sku,
-      product_image,
-      quantity 
-    } = req.body;
+    const { amount, product_name, product_sku, product_image, quantity } = req.body;
 
     const order = await razorpay.orders.create({
       amount: amount,
@@ -42,17 +36,10 @@ app.post('/create-order', async (req, res) => {
       }]
     });
 
-    res.json({ 
-      success: true,
-      order_id: order.id, 
-      amount: order.amount 
-    });
+    res.json({ success: true, order_id: order.id, amount: order.amount });
 
   } catch (error) {
-    res.status(500).json({ 
-      success: false,
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -61,38 +48,22 @@ app.post('/create-order', async (req, res) => {
 // ----------------------------------------
 app.post('/verify-payment', async (req, res) => {
   try {
-    const { 
-      razorpay_order_id, 
-      razorpay_payment_id, 
-      razorpay_signature 
-    } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
     const body = razorpay_order_id + '|' + razorpay_payment_id;
-    
     const expectedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
       .update(body)
       .toString('hex');
 
     if (expectedSignature === razorpay_signature) {
-      res.json({ 
-        success: true, 
-        message: 'Payment verified successfully',
-        payment_id: razorpay_payment_id,
-        order_id: razorpay_order_id
-      });
+      res.json({ success: true, message: 'Payment verified', payment_id: razorpay_payment_id, order_id: razorpay_order_id });
     } else {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Payment verification failed' 
-      });
+      res.status(400).json({ success: false, message: 'Payment verification failed' });
     }
 
   } catch (error) {
-    res.status(500).json({ 
-      success: false,
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -123,16 +94,8 @@ app.post('/apply-promotions', async (req, res) => {
   const { code } = req.body;
 
   const coupons = {
-    "WELCOME10": { 
-      value: 10, 
-      value_type: "percentage",
-      description: "10% off applied"
-    },
-    "FLAT100": { 
-      value: 10000,
-      value_type: "fixed_amount",
-      description: "₹100 off applied"
-    }
+    "WELCOME10": { value: 10, value_type: "percentage", description: "10% off applied" },
+    "FLAT100": { value: 10000, value_type: "fixed_amount", description: "₹100 off applied" }
   };
 
   if (coupons[code]) {
@@ -147,10 +110,7 @@ app.post('/apply-promotions', async (req, res) => {
       }
     });
   } else {
-    res.status(400).json({ 
-      success: false,
-      error: "Invalid coupon code" 
-    });
+    res.status(400).json({ success: false, error: "Invalid coupon code" });
   }
 });
 
@@ -158,7 +118,6 @@ app.post('/apply-promotions', async (req, res) => {
 // 5. SHIPPING INFO
 // ----------------------------------------
 app.post('/shipping-info', async (req, res) => {
-  app.post('/shipping-info', async (req, res) => {
   try {
     const addresses = req.body.addresses || [];
 
@@ -196,7 +155,6 @@ app.post('/shipping-info', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-});
 
 // ----------------------------------------
 // 6. PAYMENT SUCCESS PAGE
@@ -209,7 +167,7 @@ app.get('/payment-success', (req, res) => {
         <h1>✅ Payment Successful!</h1>
         <p>Thank you for your order.</p>
         <p>Payment ID: ${req.query.razorpay_payment_id || ''}</p>
-        <a href="YOUR_ZOHO_STORE_URL">Continue Shopping</a>
+        <a href="https://www.overstockbay.com">Continue Shopping</a>
       </body>
     </html>
   `);
