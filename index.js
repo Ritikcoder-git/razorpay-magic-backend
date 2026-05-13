@@ -44,7 +44,7 @@ app.post('/create-order', async (req, res) => {
 });
 
 // ----------------------------------------
-// 2. VERIFY PAYMENT
+// 2. VERIFY PAYMENT + CREATE ZOHO ORDER
 // ----------------------------------------
 app.post('/verify-payment', async (req, res) => {
   try {
@@ -57,7 +57,24 @@ app.post('/verify-payment', async (req, res) => {
       .toString('hex');
 
     if (expectedSignature === razorpay_signature) {
-      res.json({ success: true, message: 'Payment verified', payment_id: razorpay_payment_id, order_id: razorpay_order_id });
+
+      // Fetch payment details from Razorpay
+      const payment = await razorpay.payments.fetch(razorpay_payment_id);
+      
+      // Try to create order in Zoho (won't crash if it fails)
+      try {
+        await createZohoOrder(payment, razorpay_order_id);
+      } catch (zohoError) {
+        console.error('Zoho order creation failed:', zohoError.message);
+      }
+
+      res.json({
+        success: true,
+        message: 'Payment verified',
+        payment_id: razorpay_payment_id,
+        order_id: razorpay_order_id
+      });
+
     } else {
       res.status(400).json({ success: false, message: 'Payment verification failed' });
     }
@@ -66,6 +83,53 @@ app.post('/verify-payment', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ----------------------------------------
+// CREATE ORDER IN ZOHO COMMERCE
+// ----------------------------------------
+async function createZohoOrder(payment, razorpayOrderId) {
+  // Get Zoho access token
+  const tokenRes = await fetch('https://accounts.zoho.in/oauth/v2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: process.env.ZOHO_CLIENT_ID,
+      client_secret: process.env.ZOHO_CLIENT_SECRET,
+      refresh_token: process.env.ZOHO_REFRESH_TOKEN
+    })
+  });
+
+  const tokenData = await tokenRes.json();
+  const accessToken = tokenData.access_token;
+
+  if (!accessToken) {
+    throw new Error('Could not get Zoho access token: ' + JSON.stringify(tokenData));
+  }
+
+  // Create order in Zoho Commerce
+  const orderRes = await fetch('https://commerce.zoho.in/storefront/api/v1/orders', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Zoho-oauthtoken ' + accessToken,
+      'Content-Type': 'application/json',
+      'store-id': process.env.ZOHO_STORE_ID
+    },
+    body: JSON.stringify({
+      customer_email: payment.email || '',
+      customer_phone: payment.contact || '',
+      payment_status: 'paid',
+      payment_method: 'razorpay',
+      transaction_id: payment.id,
+      razorpay_order_id: razorpayOrderId,
+      order_status: 'confirmed'
+    })
+  });
+
+  const orderData = await orderRes.json();
+  console.log('Zoho order created:', JSON.stringify(orderData));
+  return orderData;
+}
 
 // ----------------------------------------
 // 3. GET PROMOTIONS
@@ -157,17 +221,27 @@ app.post('/shipping-info', async (req, res) => {
 });
 
 // ----------------------------------------
-// 6. PAYMENT SUCCESS PAGE
+// 6. PAYMENT SUCCESS — REDIRECT TO ZOHO STORE
 // ----------------------------------------
 app.get('/payment-success', (req, res) => {
+  const paymentId = req.query.razorpay_payment_id || '';
+  const orderId = req.query.razorpay_order_id || '';
+
+  // Redirect customer to your Zoho store homepage
+  res.redirect('https://www.overstockbay.com?payment_id=' + paymentId + '&order_id=' + orderId);
+});
+
+// ----------------------------------------
+// 7. ZOHO OAUTH CALLBACK (needed to get refresh token)
+// ----------------------------------------
+app.get('/zoho-callback', (req, res) => {
+  const code = req.query.code;
   res.send(`
     <html>
-      <head><title>Payment Successful</title></head>
-      <body style="font-family:sans-serif;text-align:center;padding:50px">
-        <h1>✅ Payment Successful!</h1>
-        <p>Thank you for your order.</p>
-        <p>Payment ID: ${req.query.razorpay_payment_id || ''}</p>
-        <a href="https://www.overstockbay.com">Continue Shopping</a>
+      <body style="font-family:sans-serif;padding:40px">
+        <h2>Your Zoho Authorization Code:</h2>
+        <p style="background:#f0f0f0;padding:15px;font-size:18px;word-break:break-all">${code}</p>
+        <p>Copy this code and send it to complete setup.</p>
       </body>
     </html>
   `);
