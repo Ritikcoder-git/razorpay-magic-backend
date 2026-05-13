@@ -223,7 +223,7 @@ app.post('/shipping-info', async (req, res) => {
 // ----------------------------------------
 // 6. PAYMENT SUCCESS — REDIRECT TO ZOHO STORE
 // ----------------------------------------
-app.get('/payment-success', (req, res) => {
+app.all('/payment-success', (req, res) => {
   const paymentId = req.query.razorpay_payment_id || '';
   const orderId = req.query.razorpay_order_id || '';
 
