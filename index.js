@@ -158,31 +158,44 @@ app.post('/apply-promotions', async (req, res) => {
 // 5. SHIPPING INFO
 // ----------------------------------------
 app.post('/shipping-info', async (req, res) => {
-  const { addresses } = req.body;
+  app.post('/shipping-info', async (req, res) => {
+  try {
+    const addresses = req.body.addresses || [];
 
-  res.json({
-    addresses: addresses.map(addr => ({
+    const responseAddresses = addresses.map(addr => ({
       id: addr.id,
       zipcode: addr.zipcode,
       country: addr.country || 'IN',
-      shipping_methods: [{
-        id: "standard_shipping",
-        name: "Standard Delivery (5-7 days)",
-        serviceable: true,
-        shipping_fee: 5000,
-        cod: true,
-        cod_fee: 2000
-      },
-      {
-        id: "express_shipping",
-        name: "Express Delivery (2-3 days)",
-        serviceable: true,
-        shipping_fee: 10000,
-        cod: true,
-        cod_fee: 2000
-      }]
-    }))
-  });
+      serviceable: true,
+      cod: true,
+      shipping_methods: [
+        {
+          id: "standard",
+          name: "Standard Delivery (5-7 days)",
+          description: "Delivery within 5-7 business days",
+          serviceable: true,
+          shipping_fee: 0,
+          cod: true,
+          cod_fee: 5000
+        },
+        {
+          id: "express",
+          name: "Express Delivery (2-3 days)",
+          description: "Delivery within 2-3 business days",
+          serviceable: true,
+          shipping_fee: 10000,
+          cod: true,
+          cod_fee: 5000
+        }
+      ]
+    }));
+
+    res.json({ addresses: responseAddresses });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 });
 
 // ----------------------------------------
