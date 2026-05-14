@@ -2,15 +2,25 @@ const express = require('express');
 const Razorpay = require('razorpay');
 const cors = require('cors');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use('/webhook', express.raw({ type: 'application/json' }));
+app.use(express.json());
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
+});
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
 });
 
 // ----------------------------------------
@@ -19,7 +29,6 @@ const razorpay = new Razorpay({
 app.post('/create-order', async (req, res) => {
   try {
     const { amount, product_name, product_sku, product_image, quantity } = req.body;
-
     const order = await razorpay.orders.create({
       amount: amount,
       currency: 'INR',
@@ -35,60 +44,67 @@ app.post('/create-order', async (req, res) => {
         image_url: product_image || ''
       }]
     });
-
     res.json({ success: true, order_id: order.id, amount: order.amount });
-
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // ----------------------------------------
-// 2. VERIFY PAYMENT + CREATE ZOHO ORDER
+// 2. WEBHOOK
 // ----------------------------------------
-app.post('/verify-payment', async (req, res) => {
+app.post('/webhook', async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const signature = req.headers['x-razorpay-signature'];
+    const body = req.body;
 
-    const body = razorpay_order_id + '|' + razorpay_payment_id;
     const expectedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .createHmac('sha256', process.env.WEBHOOK_SECRET)
       .update(body)
       .toString('hex');
 
-    if (expectedSignature === razorpay_signature) {
-
-      // Fetch payment details from Razorpay
-      const payment = await razorpay.payments.fetch(razorpay_payment_id);
-      
-      // Try to create order in Zoho (won't crash if it fails)
-      try {
-        await createZohoOrder(payment, razorpay_order_id);
-      } catch (zohoError) {
-        console.error('Zoho order creation failed:', zohoError.message);
-      }
-
-      res.json({
-        success: true,
-        message: 'Payment verified',
-        payment_id: razorpay_payment_id,
-        order_id: razorpay_order_id
-      });
-
-    } else {
-      res.status(400).json({ success: false, message: 'Payment verification failed' });
+    if (expectedSignature !== signature) {
+      console.log('Webhook signature mismatch');
+      return res.status(400).json({ error: 'Invalid signature' });
     }
 
+    const event = JSON.parse(body.toString());
+    console.log('Webhook received:', event.event);
+
+    if (event.event === 'payment.captured' || event.event === 'order.paid') {
+      const payment = event.payload.payment
+        ? event.payload.payment.entity
+        : event.payload.order.entity;
+
+      console.log('Processing payment:', payment.id);
+
+      const results = await Promise.allSettled([
+        createZohoOrder(payment),
+        sendCustomerEmail(payment),
+        sendAdminEmail(payment)
+      ]);
+
+      const taskNames = ['Zoho Order', 'Customer Email', 'Admin Email'];
+      results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          console.error(taskNames[i] + ' failed:', result.reason);
+        } else {
+          console.log(taskNames[i] + ' succeeded');
+        }
+      });
+    }
+
+    res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Webhook error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // ----------------------------------------
-// CREATE ORDER IN ZOHO COMMERCE
+// ZOHO ORDER
 // ----------------------------------------
-async function createZohoOrder(payment, razorpayOrderId) {
-  // Get Zoho access token
+async function createZohoOrder(payment) {
   const tokenRes = await fetch('https://accounts.zoho.in/oauth/v2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -99,15 +115,10 @@ async function createZohoOrder(payment, razorpayOrderId) {
       refresh_token: process.env.ZOHO_REFRESH_TOKEN
     })
   });
-
   const tokenData = await tokenRes.json();
   const accessToken = tokenData.access_token;
+  if (!accessToken) throw new Error('No Zoho token: ' + JSON.stringify(tokenData));
 
-  if (!accessToken) {
-    throw new Error('Could not get Zoho access token: ' + JSON.stringify(tokenData));
-  }
-
-  // Create order in Zoho Commerce
   const orderRes = await fetch('https://commerce.zoho.in/storefront/api/v1/orders', {
     method: 'POST',
     headers: {
@@ -121,14 +132,104 @@ async function createZohoOrder(payment, razorpayOrderId) {
       payment_status: 'paid',
       payment_method: 'razorpay',
       transaction_id: payment.id,
-      razorpay_order_id: razorpayOrderId,
       order_status: 'confirmed'
     })
   });
-
   const orderData = await orderRes.json();
-  console.log('Zoho order created:', JSON.stringify(orderData));
+  console.log('Zoho order response:', JSON.stringify(orderData));
   return orderData;
+}
+
+// ----------------------------------------
+// CUSTOMER EMAIL
+// ----------------------------------------
+async function sendCustomerEmail(payment) {
+  if (!payment.email) { console.log('No customer email'); return; }
+  const amount = (payment.amount / 100).toFixed(2);
+  const orderId = payment.order_id || payment.id;
+  const storeUrl = process.env.STORE_URL || 'https://www.overstockbay.com';
+
+  await transporter.sendMail({
+    from: '"Overstockbay" <' + process.env.EMAIL_USER + '>',
+    to: payment.email,
+    subject: '✅ Order Confirmed #' + orderId + ' - Overstockbay',
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <div style="background:#000000;padding:30px;text-align:center;border-radius:12px 12px 0 0">
+          <h1 style="color:white;margin:0;font-size:24px">Order Confirmed! ✅</h1>
+          <p style="color:#cccccc;margin:8px 0 0 0">Thank you for shopping with Overstockbay</p>
+        </div>
+        <div style="background:#f9fafb;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e5e7eb">
+          <p style="font-size:16px;color:#374151">Your order is confirmed and being processed.</p>
+          <div style="background:white;padding:20px;border-radius:10px;margin:20px 0;border:1px solid #e5e7eb">
+            <table style="width:100%;border-collapse:collapse">
+              <tr style="border-bottom:1px solid #f3f4f6">
+                <td style="padding:10px 0;color:#6b7280;font-size:14px">Order ID</td>
+                <td style="padding:10px 0;font-weight:700;text-align:right">${orderId}</td>
+              </tr>
+              <tr style="border-bottom:1px solid #f3f4f6">
+                <td style="padding:10px 0;color:#6b7280;font-size:14px">Amount Paid</td>
+                <td style="padding:10px 0;font-weight:700;text-align:right;color:#16a34a;font-size:18px">₹${amount}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 0;color:#6b7280;font-size:14px">Payment ID</td>
+                <td style="padding:10px 0;font-weight:700;text-align:right;font-size:12px">${payment.id}</td>
+              </tr>
+            </table>
+          </div>
+          <div style="text-align:center;margin:25px 0">
+            <a href="${storeUrl}" style="background:#000000;color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:16px;display:inline-block">
+              Continue Shopping →
+            </a>
+          </div>
+        </div>
+      </div>
+    `
+  });
+  console.log('Customer email sent to:', payment.email);
+}
+
+// ----------------------------------------
+// ADMIN EMAIL
+// ----------------------------------------
+async function sendAdminEmail(payment) {
+  if (!process.env.ADMIN_EMAIL) { console.log('No admin email set'); return; }
+  const amount = (payment.amount / 100).toFixed(2);
+  const orderId = payment.order_id || payment.id;
+
+  await transporter.sendMail({
+    from: '"Overstockbay Orders" <' + process.env.EMAIL_USER + '>',
+    to: process.env.ADMIN_EMAIL,
+    subject: '🛍️ New Order ₹' + amount + ' - ' + orderId,
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <div style="background:#16a34a;padding:25px;text-align:center;border-radius:12px 12px 0 0">
+          <h1 style="color:white;margin:0">New Order! 🛍️</h1>
+        </div>
+        <div style="background:#f9fafb;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e5e7eb">
+          <table style="width:100%;border-collapse:collapse">
+            <tr style="border-bottom:1px solid #f3f4f6">
+              <td style="padding:10px 0;color:#6b7280">Order ID</td>
+              <td style="padding:10px 0;font-weight:700;text-align:right">${orderId}</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f3f4f6">
+              <td style="padding:10px 0;color:#6b7280">Amount</td>
+              <td style="padding:10px 0;font-weight:700;text-align:right;color:#16a34a;font-size:18px">₹${amount}</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f3f4f6">
+              <td style="padding:10px 0;color:#6b7280">Email</td>
+              <td style="padding:10px 0;font-weight:700;text-align:right">${payment.email || 'Not provided'}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 0;color:#6b7280">Phone</td>
+              <td style="padding:10px 0;font-weight:700;text-align:right">${payment.contact || 'Not provided'}</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    `
+  });
+  console.log('Admin email sent');
 }
 
 // ----------------------------------------
@@ -137,16 +238,8 @@ async function createZohoOrder(payment, razorpayOrderId) {
 app.post('/get-promotions', async (req, res) => {
   res.json({
     promotions: [
-      {
-        code: "WELCOME10",
-        summary: "10% off on first order",
-        description: "Get 10% off on your first order"
-      },
-      {
-        code: "FLAT100",
-        summary: "Flat ₹100 off on orders above ₹999",
-        description: "Flat ₹100 off"
-      }
+      { code: "WELCOME10", summary: "10% off on first order", description: "Get 10% off" },
+      { code: "FLAT100", summary: "Flat ₹100 off above ₹999", description: "Flat ₹100 off" }
     ]
   });
 });
@@ -156,25 +249,14 @@ app.post('/get-promotions', async (req, res) => {
 // ----------------------------------------
 app.post('/apply-promotions', async (req, res) => {
   const { code } = req.body;
-
   const coupons = {
     "WELCOME10": { value: 10, value_type: "percentage", description: "10% off applied" },
     "FLAT100": { value: 10000, value_type: "fixed_amount", description: "₹100 off applied" }
   };
-
   if (coupons[code]) {
-    res.json({
-      promotion: {
-        reference_id: code,
-        code: code,
-        type: "coupon",
-        value: coupons[code].value,
-        value_type: coupons[code].value_type,
-        description: coupons[code].description
-      }
-    });
+    res.json({ promotion: { reference_id: code, code, type: "coupon", ...coupons[code] } });
   } else {
-    res.status(400).json({ success: false, error: "Invalid coupon code" });
+    res.status(400).json({ success: false, error: "Invalid coupon" });
   }
 });
 
@@ -184,73 +266,46 @@ app.post('/apply-promotions', async (req, res) => {
 app.post('/shipping-info', async (req, res) => {
   try {
     const addresses = req.body.addresses || [];
-
-    const responseAddresses = addresses.map(addr => ({
-      id: addr.id,
-      zipcode: addr.zipcode,
-      country: addr.country || 'IN',
-      serviceable: true,
-      cod: true,
-      shipping_methods: [
-        {
-          id: "standard",
-          name: "Standard Delivery (5-7 days)",
-          description: "Delivery within 5-7 business days",
-          serviceable: true,
-          shipping_fee: 0,
-          cod: true,
-          cod_fee: 5000
-        },
-        {
-          id: "express",
-          name: "Express Delivery (2-3 days)",
-          description: "Delivery within 2-3 business days",
-          serviceable: true,
-          shipping_fee: 10000,
-          cod: true,
-          cod_fee: 5000
-        }
-      ]
-    }));
-
-    res.json({ addresses: responseAddresses });
-
+    res.json({
+      addresses: addresses.map(addr => ({
+        id: addr.id,
+        zipcode: addr.zipcode,
+        country: addr.country || 'IN',
+        serviceable: true,
+        cod: true,
+        shipping_methods: [
+          { id: "standard", name: "Standard Delivery (5-7 days)", description: "5-7 business days", serviceable: true, shipping_fee: 0, cod: true, cod_fee: 5000 },
+          { id: "express", name: "Express Delivery (2-3 days)", description: "2-3 business days", serviceable: true, shipping_fee: 10000, cod: true, cod_fee: 5000 }
+        ]
+      }))
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // ----------------------------------------
-// 6. PAYMENT SUCCESS — REDIRECT TO ZOHO STORE
+// 6. PAYMENT SUCCESS
 // ----------------------------------------
 app.all('/payment-success', (req, res) => {
-  const paymentId = req.query.razorpay_payment_id || '';
-  const orderId = req.query.razorpay_order_id || '';
-
-  // Redirect customer to your Zoho store homepage
-  res.redirect('https://www.overstockbay.com?payment_id=' + paymentId + '&order_id=' + orderId);
+  const body = req.body || {};
+  const query = req.query || {};
+  const paymentId = body.razorpay_payment_id || query.razorpay_payment_id || '';
+  const orderId = body.razorpay_order_id || query.razorpay_order_id || '';
+  console.log('Payment success:', paymentId, orderId);
+  res.redirect('https://www.overstockbay.com?payment=success&payment_id=' + paymentId + '&order_id=' + orderId);
 });
 
 // ----------------------------------------
-// 7. ZOHO OAUTH CALLBACK (needed to get refresh token)
+// 7. ZOHO CALLBACK
 // ----------------------------------------
 app.get('/zoho-callback', (req, res) => {
   const code = req.query.code;
-  res.send(`
-    <html>
-      <body style="font-family:sans-serif;padding:40px">
-        <h2>Your Zoho Authorization Code:</h2>
-        <p style="background:#f0f0f0;padding:15px;font-size:18px;word-break:break-all">${code}</p>
-        <p>Copy this code and send it to complete setup.</p>
-      </body>
-    </html>
-  `);
+  res.send(`<html><body style="font-family:sans-serif;padding:40px"><h2>Code:</h2><p style="background:#f0f0f0;padding:15px;word-break:break-all">${code}</p><p>Copy immediately!</p></body></html>`);
 });
 
 // ----------------------------------------
-// START SERVER
+// START
 // ----------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log('Magic Checkout Backend running on port ' + PORT);
-});
+app.listen(PORT, () => console.log('Magic Checkout Backend running on port ' + PORT));
