@@ -2,7 +2,6 @@ const express = require('express');
 const Razorpay = require('razorpay');
 const cors = require('cors');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
@@ -13,14 +12,6 @@ app.use(express.json());
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
-});
-
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
 });
 
 // ----------------------------------------
@@ -72,32 +63,21 @@ app.post('/webhook', async (req, res) => {
     console.log('Webhook received:', event.event);
 
     if (event.event === 'payment.captured' || event.event === 'order.paid' || event.event === 'payment.pending') {
-let payment = null;
-if (event.payload.payment) {
-  payment = event.payload.payment.entity;
-} else if (event.payload.order) {
-  payment = event.payload.order.entity;
-}
-if (!payment) {
-  console.log('No payment entity found in event');
-  return res.json({ success: true });
-}
+      let payment = null;
+      if (event.payload.payment) {
+        payment = event.payload.payment.entity;
+      } else if (event.payload.order) {
+        payment = event.payload.order.entity;
+      }
+      if (!payment) {
+        console.log('No payment entity found');
+        return res.json({ success: true });
+      }
 
       console.log('Processing payment:', payment.id);
 
-      const results = await Promise.allSettled([
-        createZohoOrder(payment),
-        sendCustomerEmail(payment),
-        sendAdminEmail(payment)
-      ]);
-
-      const taskNames = ['Zoho Order', 'Customer Email', 'Admin Email'];
-      results.forEach((result, i) => {
-        if (result.status === 'rejected') {
-          console.error(taskNames[i] + ' failed:', result.reason);
-        } else {
-          console.log(taskNames[i] + ' succeeded');
-        }
+      const zohoResult = await createZohoOrder(payment).catch(e => {
+        console.error('Zoho Order failed:', e.message);
       });
     }
 
@@ -145,98 +125,6 @@ async function createZohoOrder(payment) {
   const orderData = await orderRes.json();
   console.log('Zoho order response:', JSON.stringify(orderData));
   return orderData;
-}
-
-// ----------------------------------------
-// CUSTOMER EMAIL
-// ----------------------------------------
-async function sendCustomerEmail(payment) {
-  if (!payment.email) { console.log('No customer email'); return; }
-  const amount = (payment.amount / 100).toFixed(2);
-  const orderId = payment.order_id || payment.id;
-  const storeUrl = process.env.STORE_URL || 'https://www.overstockbay.com';
-
-  await transporter.sendMail({
-    from: '"Overstockbay" <' + process.env.EMAIL_USER + '>',
-    to: payment.email,
-    subject: '✅ Order Confirmed #' + orderId + ' - Overstockbay',
-    html: `
-      <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
-        <div style="background:#000000;padding:30px;text-align:center;border-radius:12px 12px 0 0">
-          <h1 style="color:white;margin:0;font-size:24px">Order Confirmed! ✅</h1>
-          <p style="color:#cccccc;margin:8px 0 0 0">Thank you for shopping with Overstockbay</p>
-        </div>
-        <div style="background:#f9fafb;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e5e7eb">
-          <p style="font-size:16px;color:#374151">Your order is confirmed and being processed.</p>
-          <div style="background:white;padding:20px;border-radius:10px;margin:20px 0;border:1px solid #e5e7eb">
-            <table style="width:100%;border-collapse:collapse">
-              <tr style="border-bottom:1px solid #f3f4f6">
-                <td style="padding:10px 0;color:#6b7280;font-size:14px">Order ID</td>
-                <td style="padding:10px 0;font-weight:700;text-align:right">${orderId}</td>
-              </tr>
-              <tr style="border-bottom:1px solid #f3f4f6">
-                <td style="padding:10px 0;color:#6b7280;font-size:14px">Amount Paid</td>
-                <td style="padding:10px 0;font-weight:700;text-align:right;color:#16a34a;font-size:18px">₹${amount}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px 0;color:#6b7280;font-size:14px">Payment ID</td>
-                <td style="padding:10px 0;font-weight:700;text-align:right;font-size:12px">${payment.id}</td>
-              </tr>
-            </table>
-          </div>
-          <div style="text-align:center;margin:25px 0">
-            <a href="${storeUrl}" style="background:#000000;color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:16px;display:inline-block">
-              Continue Shopping →
-            </a>
-          </div>
-        </div>
-      </div>
-    `
-  });
-  console.log('Customer email sent to:', payment.email);
-}
-
-// ----------------------------------------
-// ADMIN EMAIL
-// ----------------------------------------
-async function sendAdminEmail(payment) {
-  if (!process.env.ADMIN_EMAIL) { console.log('No admin email set'); return; }
-  const amount = (payment.amount / 100).toFixed(2);
-  const orderId = payment.order_id || payment.id;
-
-  await transporter.sendMail({
-    from: '"Overstockbay Orders" <' + process.env.EMAIL_USER + '>',
-    to: process.env.ADMIN_EMAIL,
-    subject: '🛍️ New Order ₹' + amount + ' - ' + orderId,
-    html: `
-      <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
-        <div style="background:#16a34a;padding:25px;text-align:center;border-radius:12px 12px 0 0">
-          <h1 style="color:white;margin:0">New Order! 🛍️</h1>
-        </div>
-        <div style="background:#f9fafb;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e5e7eb">
-          <table style="width:100%;border-collapse:collapse">
-            <tr style="border-bottom:1px solid #f3f4f6">
-              <td style="padding:10px 0;color:#6b7280">Order ID</td>
-              <td style="padding:10px 0;font-weight:700;text-align:right">${orderId}</td>
-            </tr>
-            <tr style="border-bottom:1px solid #f3f4f6">
-              <td style="padding:10px 0;color:#6b7280">Amount</td>
-              <td style="padding:10px 0;font-weight:700;text-align:right;color:#16a34a;font-size:18px">₹${amount}</td>
-            </tr>
-            <tr style="border-bottom:1px solid #f3f4f6">
-              <td style="padding:10px 0;color:#6b7280">Email</td>
-              <td style="padding:10px 0;font-weight:700;text-align:right">${payment.email || 'Not provided'}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 0;color:#6b7280">Phone</td>
-              <td style="padding:10px 0;font-weight:700;text-align:right">${payment.contact || 'Not provided'}</td>
-            </tr>
-          </table>
-        </div>
-      </div>
-    `
-  });
-  console.log('Admin email sent');
 }
 
 // ----------------------------------------
