@@ -71,10 +71,17 @@ app.post('/webhook', async (req, res) => {
     const event = JSON.parse(body.toString());
     console.log('Webhook received:', event.event);
 
-    if (event.event === 'payment.captured' || event.event === 'order.paid') {
-      const payment = event.payload.payment
-        ? event.payload.payment.entity
-        : event.payload.order.entity;
+    if (event.event === 'payment.captured' || event.event === 'order.paid' || event.event === 'payment.pending') {
+let payment = null;
+if (event.payload.payment) {
+  payment = event.payload.payment.entity;
+} else if (event.payload.order) {
+  payment = event.payload.order.entity;
+}
+if (!payment) {
+  console.log('No payment entity found in event');
+  return res.json({ success: true });
+}
 
       console.log('Processing payment:', payment.id);
 
