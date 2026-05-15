@@ -117,7 +117,7 @@ async function createZohoOrder(payment) {
   const accessToken = tokenData.access_token;
   if (!accessToken) throw new Error('No Zoho token: ' + JSON.stringify(tokenData));
 
-  const orderRes = await fetch('https://commerce.zoho.in/storefront/api/v1/orders', {
+  const orderRes = await fetch('https://commerce.zoho.in/api/v1/orders', {
     method: 'POST',
     headers: {
       'Authorization': 'Zoho-oauthtoken ' + accessToken,
