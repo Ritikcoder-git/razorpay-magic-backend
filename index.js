@@ -635,16 +635,220 @@ app.all('/payment-success', (req, res) => {
 });
 
 // ----------------------------------------
-// SERVE HTML PAGES
+// ADMIN DASHBOARD
 // ----------------------------------------
 app.get('/admin', (req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.sendFile(__dirname + '/admin.html');
-});
+  res.send(`
 
-app.get('/admin.html', (req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.sendFile(__dirname + '/admin.html');
+
+  <meta>
+  <meta>
+  <title>Admin Dashboard - Overstockbay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f3f4f6; min-height: 100vh; }
+    .header { background: #000; color: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 24px; }
+    .refresh-btn { background: #16a34a; border: none; color: white; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 30px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .stat-card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .stat-card h3 { color: #6b7280; font-size: 14px; margin-bottom: 8px; }
+    .stat-card .value { font-size: 32px; font-weight: 700; }
+    .stat-card.green .value { color: #16a34a; }
+    .stat-card.blue .value { color: #2563eb; }
+    .stat-card.orange .value { color: #ea580c; }
+    .stat-card.red .value { color: #dc2626; }
+    .filters { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap; align-items: center; }
+    .filters select, .filters input { padding: 10px 15px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
+    .filters button { padding: 10px 20px; background: #000; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .orders-table { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #f9fafb; padding: 15px; text-align: left; font-size: 12px; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb; }
+    td { padding: 15px; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
+    tr:hover { background: #f9fafb; }
+    .status { display: inline-block; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .status.confirmed { background: #dbeafe; color: #1d4ed8; }
+    .status.processing { background: #fef3c7; color: #b45309; }
+    .status.shipped { background: #e0e7ff; color: #4338ca; }
+    .status.delivered { background: #d1fae5; color: #059669; }
+    .status.return_requested { background: #fee2e2; color: #dc2626; }
+    .status.refunded { background: #f3f4f6; color: #6b7280; }
+    .action-btn { padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; margin-right: 5px; }
+    .action-btn.view { background: #e0e7ff; color: #4338ca; }
+    .action-btn.update { background: #d1fae5; color: #059669; }
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+    .modal.active { display: flex; }
+    .modal-content { background: white; padding: 30px; border-radius: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .close-btn { background: none; border: none; font-size: 28px; cursor: pointer; color: #6b7280; }
+    .detail-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f3f4f6; }
+    .detail-row label { color: #6b7280; }
+    .detail-row span { font-weight: 600; }
+    .product-info { background: #f9fafb; padding: 15px; border-radius: 8px; margin: 15px 0; }
+    .product-info h4 { margin-bottom: 10px; }
+    .status-select { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; margin: 15px 0; }
+    .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .modal-actions button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: #000; color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-success { background: #16a34a; color: white; }
+    .btn-danger { background: #dc2626; color: white; }
+  </style>
+
+
+  
+    Overstockbay Admin
+    <button>Refresh</button>
+  
+  
+    
+      Total RevenueRs.0
+      Total Orders0
+      Pending0
+      Returns0
+    
+    
+      <select>
+        All Status
+        Confirmed
+        Processing
+        Shipped
+        Delivered
+        Return Requested
+        Refunded
+      </select>
+      <input>
+      <button>Search
+    
+    
+      
+        Order IDCustomerProductAmountStatusDateActions
+        Loading orders...
+      
+    
+  
+  
+    
+      Order Details<button>x
+      
+    
+  
+  <script>
+    var BACKEND = 'https://razorpay-magic-backend.onrender.com';
+    var allOrders = [];
+    
+    async function loadOrders() {
+      try {
+        var status = document.getElementById('statusFilter').value;
+        var url = BACKEND + '/admin/orders';
+        if (status) url += '?status=' + status;
+        var response = await fetch(url);
+        var data = await response.json();
+        if (data.success) {
+          allOrders = data.orders || [];
+          renderOrders();
+          updateStats();
+        }
+      } catch (e) {
+        document.getElementById('ordersBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:50px;">Error loading orders</td></tr>';
+      }
+    }
+    
+    function renderOrders() {
+      var search = document.getElementById('searchInput').value.toLowerCase();
+      var filtered = allOrders.filter(function(o) {
+        if (!search) return true;
+        return o.order_id.toLowerCase().includes(search) || (o.customer_phone && o.customer_phone.includes(search));
+      });
+      if (filtered.length === 0) {
+        document.getElementById('ordersBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:50px;">No orders found</td></tr>';
+        return;
+      }
+      var html = '';
+      for (var i = 0; i < filtered.length; i++) {
+        var o = filtered[i];
+        var items = o.order_items || [];
+        var product = items.length > 0 ? items[0].product_name : 'N/A';
+        var date = new Date(o.created_at).toLocaleDateString('en-IN');
+        html += '<tr>';
+        html += '<td><strong>' + o.order_id + '</strong></td>';
+        html += '<td>' + (o.customer_name || 'N/A') + '<br><small style="color:#888">' + (o.customer_phone || '') + '</small></td>';
+        html += '<td>' + product + '</td>';
+        html += '<td><strong>Rs.' + o.order_amount + '</strong></td>';
+        html += '<td><span class="status ' + o.order_status + '">' + o.order_status.replace(/_/g, ' ') + '</span></td>';
+        html += '<td>' + date + '</td>';
+        html += '<td><button class="action-btn view" onclick="viewOrder(\''+o.order_id+'\')">View</button><button class="action-btn update" onclick="updateStatus(\''+o.order_id+'\')">Update</button></td>';
+        html += '</tr>';
+      }
+      document.getElementById('ordersBody').innerHTML = html;
+    }
+    
+    function updateStats() {
+      var total = 0, pending = 0, returns = 0;
+      for (var i = 0; i < allOrders.length; i++) {
+        total += parseFloat(allOrders[i].order_amount || 0);
+        if (['confirmed','processing','shipped'].includes(allOrders[i].order_status)) pending++;
+        if (allOrders[i].order_status.includes('return')) returns++;
+      }
+      document.getElementById('totalRevenue').textContent = 'Rs.' + total.toLocaleString('en-IN');
+      document.getElementById('totalOrders').textContent = allOrders.length;
+      document.getElementById('pendingOrders').textContent = pending;
+      document.getElementById('returnOrders').textContent = returns;
+    }
+    
+    function viewOrder(id) {
+      var o = allOrders.find(function(x) { return x.order_id === id; });
+      if (!o) return;
+      var items = o.order_items || [];
+      var html = '<div class="detail-row"><label>Order ID</label><span>' + o.order_id + '</span></div>';
+      html += '<div class="detail-row"><label>Status</label><span class="status ' + o.order_status + '">' + o.order_status + '</span></div>';
+      html += '<div class="detail-row"><label>Amount</label><span style="color:#16a34a">Rs.' + o.order_amount + '</span></div>';
+      html += '<div class="product-info"><h4>Product</h4>';
+      for (var i = 0; i < items.length; i++) {
+        html += '<div class="detail-row"><label>Name</label><span>' + items[i].product_name + '</span></div>';
+        html += '<div class="detail-row"><label>Qty</label><span>' + items[i].quantity + '</span></div>';
+      }
+      html += '</div>';
+      html += '<div class="product-info"><h4>Customer</h4>';
+      html += '<div class="detail-row"><label>Name</label><span>' + (o.customer_name || 'N/A') + '</span></div>';
+      html += '<div class="detail-row"><label>Phone</label><span>' + (o.customer_phone || 'N/A') + '</span></div>';
+      html += '<div class="detail-row"><label>Email</label><span>' + (o.customer_email || 'N/A') + '</span></div>';
+      html += '<div class="detail-row"><label>Address</label><span>' + (o.customer_address || '') + ' ' + (o.customer_city || '') + ' ' + (o.customer_pincode || '') + '</span></div>';
+      html += '</div>';
+      html += '<div class="modal-actions"><button class="btn-secondary" onclick="closeModal()">Close</button></div>';
+      document.getElementById('modalTitle').textContent = 'Order Details';
+      document.getElementById('modalBody').innerHTML = html;
+      document.getElementById('orderModal').classList.add('active');
+    }
+    
+    function updateStatus(id) {
+      var o = allOrders.find(function(x) { return x.order_id === id; });
+      if (!o) return;
+      var html = '<div class="detail-row"><label>Order ID</label><span>' + o.order_id + '</span></div>';
+      html += '<div class="detail-row"><label>Current</label><span class="status ' + o.order_status + '">' + o.order_status + '</span></div>';
+      html += '<select class="status-select" id="newStatus"><option value="confirmed">Confirmed</option><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option></select>';
+      html += '<div class="modal-actions"><button class="btn-secondary" onclick="closeModal()">Cancel</button><button class="btn-primary" onclick="saveStatus(\''+id+'\')">Update</button></div>';
+      document.getElementById('modalTitle').textContent = 'Update Status';
+      document.getElementById('modalBody').innerHTML = html;
+      document.getElementById('newStatus').value = o.order_status;
+      document.getElementById('orderModal').classList.add('active');
+    }
+    
+    async function saveStatus(id) {
+      var status = document.getElementById('newStatus').value;
+      await fetch(BACKEND + '/admin/update-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_id: id, status: status }) });
+      alert('Updated!');
+      closeModal();
+      loadOrders();
+    }
+    
+    function closeModal() { document.getElementById('orderModal').classList.remove('active'); }
+    document.getElementById('searchInput').addEventListener('keyup', function(e) { renderOrders(); });
+    loadOrders();
+  </script>
+
+`);
 });
 
 // ----------------------------------------
