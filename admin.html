@@ -3,7 +3,7 @@
   <title>Admin Dashboard - Overstockbay</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; min-height: 100vh; }
     
     .header {
       background: #000;
@@ -14,6 +14,15 @@
       align-items: center;
     }
     .header h1 { font-size: 24px; }
+    .refresh-btn {
+      background: #16a34a;
+      border: none;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
     
     .container { max-width: 1400px; margin: 0 auto; padding: 30px; }
     
@@ -86,6 +95,7 @@
     tr:hover { background: #f9fafb; }
     
     .status {
+      display: inline-block;
       padding: 5px 12px;
       border-radius: 20px;
       font-size: 12px;
@@ -94,9 +104,11 @@
     .status.confirmed { background: #dbeafe; color: #1d4ed8; }
     .status.processing { background: #fef3c7; color: #b45309; }
     .status.shipped { background: #e0e7ff; color: #4338ca; }
+    .status.out_for_delivery { background: #fef3c7; color: #b45309; }
     .status.delivered { background: #d1fae5; color: #059669; }
     .status.return_requested { background: #fee2e2; color: #dc2626; }
     .status.return_approved { background: #fef3c7; color: #b45309; }
+    .status.return_rejected { background: #f3f4f6; color: #6b7280; }
     .status.refunded { background: #f3f4f6; color: #6b7280; }
     
     .action-btn {
@@ -106,6 +118,7 @@
       cursor: pointer;
       font-size: 12px;
       margin-right: 5px;
+      font-weight: 500;
     }
     .action-btn.view { background: #e0e7ff; color: #4338ca; }
     .action-btn.update { background: #d1fae5; color: #059669; }
@@ -143,9 +156,10 @@
     .close-btn {
       background: none;
       border: none;
-      font-size: 24px;
+      font-size: 28px;
       cursor: pointer;
       color: #6b7280;
+      line-height: 1;
     }
     
     .detail-row {
@@ -155,7 +169,7 @@
       border-bottom: 1px solid #f3f4f6;
     }
     .detail-row label { color: #6b7280; }
-    .detail-row span { font-weight: 600; }
+    .detail-row span { font-weight: 600; text-align: right; }
     
     .status-select {
       width: 100%;
@@ -197,14 +211,19 @@
       margin: 15px 0;
     }
     .product-info h4 { margin-bottom: 10px; color: #374151; }
+    
+    .no-orders {
+      text-align: center;
+      padding: 60px 20px;
+      color: #6b7280;
+    }
+    .no-orders h3 { font-size: 18px; margin-bottom: 10px; }
   </style>
 
 
   
     📦 Overstockbay Admin
-    
-      <button>🔄 Refresh</button>
-    
+    <button>🔄 Refresh</button>
   
   
   
@@ -233,6 +252,7 @@
         Confirmed
         Processing
         Shipped
+        Out for Delivery
         Delivered
         Return Requested
         Return Approved
@@ -263,7 +283,6 @@
   
   
   
-  
     
       
         Order Details
@@ -279,21 +298,25 @@
     
     async function loadOrders() {
       try {
+        document.getElementById('ordersBody').innerHTML = '<tr><td colspan="7" class="loading">Loading orders...</td></tr>';
+        
         const status = document.getElementById('statusFilter').value;
-        let url = `${BACKEND_URL}/admin/orders`;
-        if (status) url += `?status=${status}`;
+        let url = BACKEND_URL + '/admin/orders';
+        if (status) url += '?status=' + status;
         
         const response = await fetch(url);
         const data = await response.json();
         
         if (data.success) {
-          allOrders = data.orders;
+          allOrders = data.orders || [];
           renderOrders(allOrders);
           updateStats(allOrders);
+        } else {
+          document.getElementById('ordersBody').innerHTML = '<tr><td colspan="7" class="loading">Error: ' + (data.error || 'Unknown error') + '</td></tr>';
         }
       } catch (error) {
         console.error('Error loading orders:', error);
-        document.getElementById('ordersBody').innerHTML = '<tr><td colspan="7" class="loading">Error loading orders</td></tr>';
+        document.getElementById('ordersBody').innerHTML = '<tr><td colspan="7" class="loading">Error loading orders. Check console.</td></tr>';
       }
     }
     
@@ -302,195 +325,167 @@
       
       let filtered = orders;
       if (search) {
-        filtered = orders.filter(o => 
-          o.order_id.toLowerCase().includes(search) ||
-          (o.customer_phone && o.customer_phone.includes(search)) ||
-          (o.customer_name && o.customer_name.toLowerCase().includes(search))
-        );
+        filtered = orders.filter(function(o) {
+          return o.order_id.toLowerCase().includes(search) ||
+            (o.customer_phone && o.customer_phone.includes(search)) ||
+            (o.customer_name && o.customer_name.toLowerCase().includes(search));
+        });
       }
       
       if (filtered.length === 0) {
-        document.getElementById('ordersBody').innerHTML = '<tr><td colspan="7" class="loading">No orders found</td></tr>';
+        document.getElementById('ordersBody').innerHTML = '<tr><td colspan="7" class="no-orders"><h3>No orders found</h3><p>Orders will appear here after customers place them.</p></td></tr>';
         return;
       }
       
-      const html = filtered.map(order => {
-        const items = order.order_items || [];
-        const productName = items.length > 0 ? items[0].product_name : 'N/A';
-        const date = new Date(order.created_at).toLocaleDateString('en-IN', {
+      var html = '';
+      for (var i = 0; i < filtered.length; i++) {
+        var order = filtered[i];
+        var items = order.order_items || [];
+        var productName = items.length > 0 ? items[0].product_name : 'N/A';
+        var date = new Date(order.created_at).toLocaleDateString('en-IN', {
           day: 'numeric', month: 'short', year: 'numeric'
         });
         
-        return `
-          <tr>
-            <td><strong>${order.order_id}</strong></td>
-            <td>
-              <div>${order.customer_name || 'N/A'}</div>
-              <div style="color:#6b7280;font-size:12px;">${order.customer_phone}</div>
-            </td>
-            <td>${productName}</td>
-            <td><strong>₹${order.order_amount}</strong></td>
-            <td><span class="status ${order.order_status}">${order.order_status.replace('_', ' ')}</span></td>
-            <td>${date}</td>
-            <td>
-              <button class="action-btn view" onclick="viewOrder('${order.order_id}')">View</button>
-              <button class="action-btn update" onclick="updateOrderStatus('${order.order_id}')">Update</button>
-              ${order.order_status === 'return_requested' ? `<button class="action-btn return" onclick="processReturn('${order.order_id}')">Return</button>` : ''}
-            </td>
-          </tr>
-        `;
-      }).join('');
+        html += '<tr>';
+        html += '<td><strong>' + order.order_id + '</strong></td>';
+        html += '<td><div>' + (order.customer_name || 'N/A') + '</div><div style="color:#6b7280;font-size:12px;">' + (order.customer_phone || '') + '</div></td>';
+        html += '<td>' + productName + '</td>';
+        html += '<td><strong>₹' + order.order_amount + '</strong></td>';
+        html += '<td><span class="status ' + order.order_status + '">' + order.order_status.replace(/_/g, ' ') + '</span></td>';
+        html += '<td>' + date + '</td>';
+        html += '<td>';
+        html += '<button class="action-btn view" onclick="viewOrder('' + order.order_id + '')">View</button>';
+        html += '<button class="action-btn update" onclick="updateOrderStatus('' + order.order_id + '')">Update</button>';
+        if (order.order_status === 'return_requested') {
+          html += '<button class="action-btn return" onclick="processReturn('' + order.order_id + '')">Return</button>';
+        }
+        html += '</td>';
+        html += '</tr>';
+      }
       
       document.getElementById('ordersBody').innerHTML = html;
     }
     
     function updateStats(orders) {
-      const totalRevenue = orders.reduce((sum, o) => sum + parseFloat(o.order_amount || 0), 0);
-      const totalOrders = orders.length;
-      const pendingOrders = orders.filter(o => ['confirmed', 'processing', 'shipped'].includes(o.order_status)).length;
-      const returnOrders = orders.filter(o => o.order_status.includes('return')).length;
+      var totalRevenue = 0;
+      var pendingOrders = 0;
+      var returnOrders = 0;
+      
+      for (var i = 0; i < orders.length; i++) {
+        totalRevenue += parseFloat(orders[i].order_amount || 0);
+        if (['confirmed', 'processing', 'shipped', 'out_for_delivery'].includes(orders[i].order_status)) {
+          pendingOrders++;
+        }
+        if (orders[i].order_status.includes('return')) {
+          returnOrders++;
+        }
+      }
       
       document.getElementById('totalRevenue').textContent = '₹' + totalRevenue.toLocaleString('en-IN');
-      document.getElementById('totalOrders').textContent = totalOrders;
+      document.getElementById('totalOrders').textContent = orders.length;
       document.getElementById('pendingOrders').textContent = pendingOrders;
       document.getElementById('returnOrders').textContent = returnOrders;
     }
     
     function viewOrder(orderId) {
-      const order = allOrders.find(o => o.order_id === orderId);
+      var order = null;
+      for (var i = 0; i < allOrders.length; i++) {
+        if (allOrders[i].order_id === orderId) {
+          order = allOrders[i];
+          break;
+        }
+      }
       if (!order) return;
       
-      const items = order.order_items || [];
-      const returns = order.returns || [];
+      var items = order.order_items || [];
+      var returns = order.returns || [];
       
-      const html = `
-        <div class="detail-row">
-          <label>Order ID</label>
-          <span>${order.order_id}</span>
-        </div>
-        <div class="detail-row">
-          <label>Status</label>
-          <span class="status ${order.order_status}">${order.order_status.replace('_', ' ')}</span>
-        </div>
-        <div class="detail-row">
-          <label>Amount</label>
-          <span style="color:#16a34a;font-size:20px;">₹${order.order_amount}</span>
-        </div>
-        <div class="detail-row">
-          <label>Payment ID</label>
-          <span style="font-size:12px;">${order.razorpay_payment_id || 'N/A'}</span>
-        </div>
-        
-        <div class="product-info">
-          <h4>📦 Product Details</h4>
-          ${items.map(item => `
-            <div class="detail-row">
-              <label>Product</label>
-              <span>${item.product_name}</span>
-            </div>
-            <div class="detail-row">
-              <label>Quantity</label>
-              <span>${item.quantity}</span>
-            </div>
-            ${item.product_size ? `<div class="detail-row"><label>Size</label><span>${item.product_size}</span></div>` : ''}
-            ${item.product_color ? `<div class="detail-row"><label>Color</label><span>${item.product_color}</span></div>` : ''}
-          `).join('')}
-        </div>
-        
-        <div class="product-info">
-          <h4>👤 Customer Details</h4>
-          <div class="detail-row">
-            <label>Name</label>
-            <span>${order.customer_name || 'N/A'}</span>
-          </div>
-          <div class="detail-row">
-            <label>Phone</label>
-            <span>${order.customer_phone}</span>
-          </div>
-          <div class="detail-row">
-            <label>Email</label>
-            <span>${order.customer_email || 'N/A'}</span>
-          </div>
-          <div class="detail-row">
-            <label>Address</label>
-            <span>${order.customer_address || ''}, ${order.customer_city || ''}, ${order.customer_state || ''} - ${order.customer_pincode || ''}</span>
-          </div>
-        </div>
-        
-        ${returns.length > 0 ? `
-          <div class="product-info" style="background:#fee2e2;">
-            <h4>🔄 Return Request</h4>
-            <div class="detail-row">
-              <label>Reason</label>
-              <span>${returns[0].return_reason}</span>
-            </div>
-            <div class="detail-row">
-              <label>Status</label>
-              <span>${returns[0].return_status}</span>
-            </div>
-          </div>
-        ` : ''}
-        
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="closeModal()">Close</button>
-        </div>
-      `;
+      var html = '';
+      html += '<div class="detail-row"><label>Order ID</label><span>' + order.order_id + '</span></div>';
+      html += '<div class="detail-row"><label>Status</label><span class="status ' + order.order_status + '">' + order.order_status.replace(/_/g, ' ') + '</span></div>';
+      html += '<div class="detail-row"><label>Amount</label><span style="color:#16a34a;font-size:20px;">₹' + order.order_amount + '</span></div>';
+      html += '<div class="detail-row"><label>Payment ID</label><span style="font-size:11px;">' + (order.razorpay_payment_id || 'N/A') + '</span></div>';
       
+      html += '<div class="product-info"><h4>📦 Product Details</h4>';
+      for (var j = 0; j < items.length; j++) {
+        var item = items[j];
+        html += '<div class="detail-row"><label>Product</label><span>' + item.product_name + '</span></div>';
+        html += '<div class="detail-row"><label>Quantity</label><span>' + item.quantity + '</span></div>';
+        if (item.product_size) html += '<div class="detail-row"><label>Size</label><span>' + item.product_size + '</span></div>';
+        if (item.product_color) html += '<div class="detail-row"><label>Color</label><span>' + item.product_color + '</span></div>';
+      }
+      html += '</div>';
+      
+      html += '<div class="product-info"><h4>👤 Customer Details</h4>';
+      html += '<div class="detail-row"><label>Name</label><span>' + (order.customer_name || 'N/A') + '</span></div>';
+      html += '<div class="detail-row"><label>Phone</label><span>' + (order.customer_phone || 'N/A') + '</span></div>';
+      html += '<div class="detail-row"><label>Email</label><span>' + (order.customer_email || 'N/A') + '</span></div>';
+      html += '<div class="detail-row"><label>Address</label><span>' + (order.customer_address || '') + ', ' + (order.customer_city || '') + ', ' + (order.customer_state || '') + ' - ' + (order.customer_pincode || '') + '</span></div>';
+      html += '</div>';
+      
+      if (returns.length > 0) {
+        html += '<div class="product-info" style="background:#fee2e2;"><h4>🔄 Return Request</h4>';
+        html += '<div class="detail-row"><label>Reason</label><span>' + returns[0].return_reason + '</span></div>';
+        html += '<div class="detail-row"><label>Status</label><span>' + returns[0].return_status + '</span></div>';
+        html += '</div>';
+      }
+      
+      html += '<div class="modal-actions"><button class="btn-secondary" onclick="closeModal()">Close</button></div>';
+      
+      document.getElementById('modalTitle').textContent = 'Order Details';
       document.getElementById('modalBody').innerHTML = html;
       document.getElementById('orderModal').classList.add('active');
     }
     
     function updateOrderStatus(orderId) {
-      const order = allOrders.find(o => o.order_id === orderId);
+      var order = null;
+      for (var i = 0; i < allOrders.length; i++) {
+        if (allOrders[i].order_id === orderId) {
+          order = allOrders[i];
+          break;
+        }
+      }
       if (!order) return;
       
-      const html = `
-        <div class="detail-row">
-          <label>Order ID</label>
-          <span>${order.order_id}</span>
-        </div>
-        <div class="detail-row">
-          <label>Current Status</label>
-          <span class="status ${order.order_status}">${order.order_status.replace('_', ' ')}</span>
-        </div>
-        
-        <label style="display:block;margin-top:20px;font-weight:600;">Update Status:</label>
-        <select class="status-select" id="newStatus">
-          <option value="confirmed">Confirmed</option>
-          <option value="processing">Processing</option>
-          <option value="shipped">Shipped</option>
-          <option value="out_for_delivery">Out for Delivery</option>
-          <option value="delivered">Delivered</option>
-        </select>
-        
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn-primary" onclick="saveStatus('${orderId}')">Update Status</button>
-        </div>
-      `;
+      var html = '';
+      html += '<div class="detail-row"><label>Order ID</label><span>' + order.order_id + '</span></div>';
+      html += '<div class="detail-row"><label>Current Status</label><span class="status ' + order.order_status + '">' + order.order_status.replace(/_/g, ' ') + '</span></div>';
+      html += '<label style="display:block;margin-top:20px;font-weight:600;">Update Status:</label>';
+      html += '<select class="status-select" id="newStatus">';
+      html += '<option value="confirmed">Confirmed</option>';
+      html += '<option value="processing">Processing</option>';
+      html += '<option value="shipped">Shipped</option>';
+      html += '<option value="out_for_delivery">Out for Delivery</option>';
+      html += '<option value="delivered">Delivered</option>';
+      html += '</select>';
+      html += '<div class="modal-actions">';
+      html += '<button class="btn-secondary" onclick="closeModal()">Cancel</button>';
+      html += '<button class="btn-primary" onclick="saveStatus('' + orderId + '')">Update Status</button>';
+      html += '</div>';
       
+      document.getElementById('modalTitle').textContent = 'Update Order Status';
       document.getElementById('modalBody').innerHTML = html;
       document.getElementById('newStatus').value = order.order_status;
       document.getElementById('orderModal').classList.add('active');
     }
     
     async function saveStatus(orderId) {
-      const newStatus = document.getElementById('newStatus').value;
+      var newStatus = document.getElementById('newStatus').value;
       
       try {
-        const response = await fetch(`${BACKEND_URL}/admin/update-order`, {
+        var response = await fetch(BACKEND_URL + '/admin/update-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ order_id: orderId, status: newStatus })
         });
         
-        const data = await response.json();
+        var data = await response.json();
         if (data.success) {
           alert('Order status updated!');
           closeModal();
           loadOrders();
         } else {
-          alert('Error: ' + data.error);
+          alert('Error: ' + (data.error || 'Unknown error'));
         }
       } catch (error) {
         alert('Error updating order');
@@ -498,36 +493,29 @@
     }
     
     function processReturn(orderId) {
-      const order = allOrders.find(o => o.order_id === orderId);
+      var order = null;
+      for (var i = 0; i < allOrders.length; i++) {
+        if (allOrders[i].order_id === orderId) {
+          order = allOrders[i];
+          break;
+        }
+      }
       if (!order) return;
       
-      const returns = order.returns || [];
-      const returnInfo = returns[0] || {};
+      var returns = order.returns || [];
+      var returnInfo = returns[0] || {};
       
-      const html = `
-        <div class="detail-row">
-          <label>Order ID</label>
-          <span>${order.order_id}</span>
-        </div>
-        <div class="detail-row">
-          <label>Amount</label>
-          <span style="color:#16a34a;">₹${order.order_amount}</span>
-        </div>
-        <div class="detail-row">
-          <label>Return Reason</label>
-          <span>${returnInfo.return_reason || 'N/A'}</span>
-        </div>
-        <div class="detail-row">
-          <label>Description</label>
-          <span>${returnInfo.return_description || 'N/A'}</span>
-        </div>
-        
-        <div class="modal-actions">
-          <button class="btn-danger" onclick="rejectReturn('${orderId}')">Reject Return</button>
-          <button class="btn-success" onclick="approveReturn('${orderId}')">Approve & Refund</button>
-        </div>
-      `;
+      var html = '';
+      html += '<div class="detail-row"><label>Order ID</label><span>' + order.order_id + '</span></div>';
+      html += '<div class="detail-row"><label>Amount</label><span style="color:#16a34a;">₹' + order.order_amount + '</span></div>';
+      html += '<div class="detail-row"><label>Return Reason</label><span>' + (returnInfo.return_reason || 'N/A') + '</span></div>';
+      html += '<div class="detail-row"><label>Description</label><span>' + (returnInfo.return_description || 'N/A') + '</span></div>';
+      html += '<div class="modal-actions">';
+      html += '<button class="btn-danger" onclick="rejectReturn('' + orderId + '')">Reject Return</button>';
+      html += '<button class="btn-success" onclick="approveReturn('' + orderId + '')">Approve & Refund</button>';
+      html += '</div>';
       
+      document.getElementById('modalTitle').textContent = 'Process Return';
       document.getElementById('modalBody').innerHTML = html;
       document.getElementById('orderModal').classList.add('active');
     }
@@ -536,15 +524,13 @@
       if (!confirm('Approve return and process refund?')) return;
       
       try {
-        // Approve return
-        await fetch(`${BACKEND_URL}/admin/process-return`, {
+        await fetch(BACKEND_URL + '/admin/process-return', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ order_id: orderId, action: 'approve' })
         });
         
-        // Process refund
-        await fetch(`${BACKEND_URL}/admin/process-refund`, {
+        await fetch(BACKEND_URL + '/admin/process-refund', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ order_id: orderId })
@@ -562,7 +548,7 @@
       if (!confirm('Reject this return request?')) return;
       
       try {
-        await fetch(`${BACKEND_URL}/admin/process-return`, {
+        await fetch(BACKEND_URL + '/admin/process-return', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ order_id: orderId, action: 'reject' })
@@ -580,12 +566,13 @@
       document.getElementById('orderModal').classList.remove('active');
     }
     
-    // Search on enter
     document.getElementById('searchInput').addEventListener('keyup', function(e) {
-      if (e.key === 'Enter') loadOrders();
-      else renderOrders(allOrders);
+      if (e.key === 'Enter') {
+        loadOrders();
+      } else {
+        renderOrders(allOrders);
+      }
     });
     
-    // Load orders on page load
     loadOrders();
   </script>
