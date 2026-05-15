@@ -101,9 +101,16 @@ const body = req.body;
 });
 
 // ----------------------------------------
-// ZOHO ORDER
 // ----------------------------------------
-async function createZohoOrder(payment) {
+// ZOHO TOKEN CACHE
+// ----------------------------------------
+let zohoTokenCache = null;
+let zohoTokenExpiry = 0;
+
+async function getZohoToken() {
+  if (zohoTokenCache && Date.now() < zohoTokenExpiry) {
+    return zohoTokenCache;
+  }
   const tokenRes = await fetch('https://accounts.zoho.in/oauth/v2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -115,8 +122,17 @@ async function createZohoOrder(payment) {
     })
   });
   const tokenData = await tokenRes.json();
-  const accessToken = tokenData.access_token;
-  if (!accessToken) throw new Error('No Zoho token: ' + JSON.stringify(tokenData));
+  if (!tokenData.access_token) throw new Error('No Zoho token: ' + JSON.stringify(tokenData));
+  zohoTokenCache = tokenData.access_token;
+  zohoTokenExpiry = Date.now() + (55 * 60 * 1000);
+  return zohoTokenCache;
+}
+
+// ----------------------------------------
+// ZOHO ORDER
+// ----------------------------------------
+async function createZohoOrder(payment) {
+  const accessToken = await getZohoToken();
 
   const orderRes = await fetch('https://commerce.zoho.in/api/v1/orders', {
     method: 'POST',
