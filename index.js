@@ -2,7 +2,7 @@ const express = require('express');
 const Razorpay = require('razorpay');
 const cors = require('cors');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
+
 require('dotenv').config();
 
 const app = express();
@@ -15,7 +15,6 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-const transporter = nodemailer.createTransport({
   host: 'smtp-relay.brevo.com',
   port: 587,
   secure: false,
@@ -157,47 +156,51 @@ async function createZohoOrder(payment) {
 // ----------------------------------------
 // CUSTOMER EMAIL
 // ----------------------------------------
-async function sendCustomerEmail(payment) {
-  if (!payment.email) { console.log('No customer email'); return; }
+async function sendAdminEmail(payment) {
+  if (!process.env.ADMIN_EMAIL) return;
   const amount = (payment.amount / 100).toFixed(2);
   const orderId = payment.order_id || payment.id;
-  const storeUrl = process.env.STORE_URL || 'https://www.overstockbay.com';
 
-  await transporter.sendMail({
-    from: '"Overstockbay" <' + process.env.EMAIL_USER + '>',
-    to: payment.email,
-    subject: '✅ Order Confirmed #' + orderId,
-    html: `
-      <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
-        <div style="background:#000;padding:30px;text-align:center;border-radius:12px 12px 0 0">
-          <h1 style="color:white;margin:0">Order Confirmed! ✅</h1>
-          <p style="color:#ccc;margin:8px 0 0">Thank you for shopping with Overstockbay</p>
-        </div>
-        <div style="background:#f9fafb;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e5e7eb">
-          <table style="width:100%;border-collapse:collapse">
-            <tr style="border-bottom:1px solid #f3f4f6">
-              <td style="padding:10px 0;color:#6b7280">Order ID</td>
-              <td style="padding:10px 0;font-weight:700;text-align:right">${orderId}</td>
-            </tr>
-            <tr style="border-bottom:1px solid #f3f4f6">
-              <td style="padding:10px 0;color:#6b7280">Amount Paid</td>
-              <td style="padding:10px 0;font-weight:700;text-align:right;color:#16a34a;font-size:18px">₹${amount}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 0;color:#6b7280">Payment ID</td>
-              <td style="padding:10px 0;font-weight:700;text-align:right;font-size:12px">${payment.id}</td>
-            </tr>
-          </table>
-          <div style="text-align:center;margin:25px 0">
-            <a href="${storeUrl}" style="background:#000;color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700">
-              Continue Shopping →
-            </a>
+  await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': process.env.BREVO_API_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: { name: 'Overstockbay Orders', email: process.env.EMAIL_USER },
+      to: [{ email: process.env.ADMIN_EMAIL }],
+      subject: '🛍️ New Order ₹' + amount + ' - ' + orderId,
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <div style="background:#16a34a;padding:25px;text-align:center;border-radius:12px 12px 0 0">
+            <h1 style="color:white;margin:0">New Order! 🛍️</h1>
+          </div>
+          <div style="background:#f9fafb;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e5e7eb">
+            <table style="width:100%;border-collapse:collapse">
+              <tr style="border-bottom:1px solid #f3f4f6">
+                <td style="padding:10px 0;color:#6b7280">Order ID</td>
+                <td style="padding:10px 0;font-weight:700;text-align:right">${orderId}</td>
+              </tr>
+              <tr style="border-bottom:1px solid #f3f4f6">
+                <td style="padding:10px 0;color:#6b7280">Amount</td>
+                <td style="padding:10px 0;font-weight:700;text-align:right;color:#16a34a;font-size:18px">₹${amount}</td>
+              </tr>
+              <tr style="border-bottom:1px solid #f3f4f6">
+                <td style="padding:10px 0;color:#6b7280">Email</td>
+                <td style="padding:10px 0;font-weight:700;text-align:right">${payment.email || 'Not provided'}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 0;color:#6b7280">Phone</td>
+                <td style="padding:10px 0;font-weight:700;text-align:right">${payment.contact || 'Not provided'}</td>
+              </tr>
+            </table>
           </div>
         </div>
-      </div>
-    `
+      `
+    })
   });
-  console.log('Customer email sent to:', payment.email);
+  console.log('Admin email sent');
 }
 
 // ----------------------------------------
