@@ -635,6 +635,19 @@ app.all('/payment-success', (req, res) => {
 });
 
 // ----------------------------------------
+// SERVE HTML PAGES
+// ----------------------------------------
+app.get('/admin', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.sendFile(__dirname + '/admin.html');
+});
+
+app.get('/admin.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.sendFile(__dirname + '/admin.html');
+});
+
+// ----------------------------------------
 // HEALTH CHECK
 // ----------------------------------------
 app.get('/', (req, res) => {
